@@ -3,7 +3,6 @@ from django.contrib.contenttypes.models import ContentType
 from netbox.api.fields import ChoiceField, ContentTypeField, SerializedPKRelatedField
 from utilities.api import get_serializer_for_model
 
-
 from netbox.api.serializers import NetBoxModelSerializer
 
 from .. import models, choices
@@ -43,7 +42,6 @@ class ThreatEventSerializer(NetBoxModelSerializer):
     relevance = ChoiceField(choices=choices.RelevanceChoices)
     likelihood = ChoiceField(choices=choices.LikelihoodChoices)
 
-
     def get_display(self, obj):
         return obj.name
 
@@ -66,9 +64,10 @@ class ThreatEventSerializer(NetBoxModelSerializer):
 # Vulnerability Serializers
 
 class VulnerabilitySerializer(NetBoxModelSerializer):
-    
     url = serializers.HyperlinkedIdentityField(view_name="plugins-api:nb_risk-api:vulnerability-detail")
     display = serializers.SerializerMethodField('get_display')
+
+    base_score = serializers.DecimalField(max_digits=4, decimal_places=2, required=False, allow_null=True)  # ✅ ADDED BASE SCORE
 
     def get_display(self, obj):
         return obj.name
@@ -82,10 +81,10 @@ class VulnerabilitySerializer(NetBoxModelSerializer):
             "name",
             "cve",
             "description",
+            "base_score",  # ✅ INCLUDED BASE SCORE IN API RESPONSE
         ]
 
-        brief_fields = ['id', 'url', 'display', 'name', 'description']
-
+        brief_fields = ['id', 'url', 'display', 'name', 'description', 'base_score']
 
 # VulnerabilityAssignment Serializers
 
@@ -118,7 +117,6 @@ class VulnerabilityAssignmentSerializer(NetBoxModelSerializer):
     def get_display(self, obj):
         return obj.name
 
-
     class Meta:
         model = models.VulnerabilityAssignment
         fields = [
@@ -140,7 +138,6 @@ class RiskSerializer(NetBoxModelSerializer):
     
     threat_event = serializers.SlugRelatedField(slug_field="name", queryset=models.ThreatEvent.objects.all())
 
-   
     def get_display(self, obj):
         return obj.name
 
@@ -162,7 +159,7 @@ class RiskSerializer(NetBoxModelSerializer):
 class ControlSerializer(NetBoxModelSerializer):
     url = serializers.HyperlinkedIdentityField(view_name="plugins-api:nb_risk-api:control-detail")
     display = serializers.SerializerMethodField('get_display')
-    risk = RiskSerializer(many=True,required=False, allow_null=True, nested=True)
+    risk = RiskSerializer(many=True, required=False, allow_null=True, nested=True)
 
     def get_display(self, obj):
         return obj.name
