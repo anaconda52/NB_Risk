@@ -1,0 +1,358 @@
+from django.core.exceptions import MultipleObjectsReturned, ValidationError, ObjectDoesNotExist
+from django.contrib.contenttypes.models import ContentType
+
+from netbox.views import generic
+from dcim.models import Device, Site
+from tenancy.models import Tenant
+from virtualization.models import VirtualMachine
+from core.models import ObjectType as ContentType
+from ipam.models import IPAddress
+
+from netbox.plugins.utils import get_plugin_config
+from utilities.views import ViewTab, register_model_view
+from django.shortcuts import get_object_or_404
+from django.urls import reverse
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+from . import forms, models, tables, filtersets, custom_views
+
+# ThreatSource Views
+
+
+class ThreatSourceView(generic.ObjectView):
+    queryset = models.ThreatSource.objects.all()
+
+
+class ThreatSourceListView(generic.ObjectListView):
+    queryset = models.ThreatSource.objects.all()
+    table = tables.ThreatSourceTable
+    filterset = filtersets.ThreatSourceFilterSet
+    filterset_form = forms.ThreatSourceFilterForm
+
+
+class ThreatSourceEditView(custom_views.GetReturnURLMixin, generic.ObjectEditView):
+    queryset = models.ThreatSource.objects.all()
+    form = forms.ThreatSourceForm
+
+
+class ThreatSourceImportView(generic.BulkImportView):
+    queryset = models.ThreatSource.objects.all()
+    model_form = forms.ThreatSourceImportForm
+    table = tables.ThreatSourceTable
+
+class ThreatSourceBulkEditView(generic.BulkEditView):
+    queryset = models.ThreatSource.objects.all()
+    filterset = filtersets.ThreatSourceFilterSet
+    table = tables.ThreatSourceTable
+    form = forms.ThreatSourceBulkEditForm
+
+class ThreatSourceBulkDeleteView(generic.BulkDeleteView):
+    queryset = models.ThreatSource.objects.all()
+    table = tables.ThreatSourceTable
+
+class ThreatSourceDeleteView(generic.ObjectDeleteView):
+    queryset = models.ThreatSource.objects.all()
+
+
+# ThreatEvent Views
+
+
+class ThreatEventView(generic.ObjectView):
+    queryset = models.ThreatEvent.objects.all()
+
+
+@register_model_view(models.ThreatEvent, name='vulnerabilities')
+class ThreatEventVulnerabilityView(generic.ObjectChildrenView):
+    queryset = models.ThreatEvent.objects.all()
+    child_model = models.Vulnerability
+    table = tables.VulnerabilityExploitListTable
+    template_name = "nb_risk/threatevent_vulnerabilities.html"
+    tab = ViewTab(label='Exploit Vulnerabilities', badge=lambda obj: obj.vulnerability.all().count(), hide_if_empty=True)
+
+    def get_children(self, request, parent):
+            childrens = parent.vulnerability.all()
+            return childrens
+
+
+class ThreatEventListView(generic.ObjectListView):
+    queryset = models.ThreatEvent.objects.all()
+    table = tables.ThreatEventTable
+    filterset = filtersets.ThreatEventFilterSet
+    filterset_form = forms.ThreatEventFilterForm
+
+
+class ThreatEventEditView(custom_views.GetReturnURLMixin, generic.ObjectEditView):
+    queryset = models.ThreatEvent.objects.all()
+    form = forms.ThreatEventForm
+
+
+class ThreatEventDeleteView(generic.ObjectDeleteView):
+    queryset = models.ThreatEvent.objects.all()
+
+
+class ThreatEventBulkDeleteView(generic.BulkDeleteView):
+    queryset = models.ThreatEvent.objects.all()
+    table = tables.ThreatEventTable
+
+
+# Vulnerability Views
+
+
+class VulnerabilityView(generic.ObjectView):
+    queryset = models.Vulnerability.objects.all()
+
+
+@register_model_view(models.Vulnerability, name='affected_assets')
+class VulnerabilityAffectedAssetsView(generic.ObjectChildrenView):
+    queryset = models.Vulnerability.objects.all()
+    child_model = models.Vulnerability
+    table = tables.VulnerabilityAssignmentListTable
+    template_name = "nb_risk/vulnerability_affected_assets.html"
+    tab = ViewTab(label='Affected Assets', badge=lambda obj: models.VulnerabilityAssignment.objects.filter(vulnerability=obj).count(), hide_if_empty=True)
+
+    def get_children(self, request, parent):
+            childrens = models.VulnerabilityAssignment.objects.filter(vulnerability=parent)
+            return childrens
+
+    
+class VulnerabilityListView(generic.ObjectListView):
+    queryset = models.Vulnerability.objects.all()
+    table = tables.VulnerabilityTable
+    filterset = filtersets.VulnerabilityFilterSet
+    filterset_form = forms.VulnerabilityFilterForm
+    template_name = "nb_risk/vulnerability_list.html"
+
+
+class VulnerabilityEditView(custom_views.GetReturnURLMixin, generic.ObjectEditView):
+    queryset = models.Vulnerability.objects.all()
+    form = forms.VulnerabilityForm
+
+class VulnerabilityBulkImportView(generic.BulkImportView):
+    queryset = models.Vulnerability.objects.all()
+    model_form = forms.VulnerabilityImportForm
+
+class VulnerabilityDeleteView(generic.ObjectDeleteView):
+    queryset = models.Vulnerability.objects.all()
+
+
+class VulnerabilityBulkDeleteView(generic.BulkDeleteView):
+    queryset = models.Vulnerability.objects.all()
+    table = tables.VulnerabilityTable
+
+
+# Generic Vulnerability List View
+
+
+def create_view(model_representation):
+
+    app_label, model = model_representation.split(".")
+    model = ContentType.objects.get(app_label=app_label, model=model).model_class()
+    name = f"{model._meta.model_name}-vulnerability_list"
+    path = f"{model._meta.model_name}-vulnerability_list"
+    base_template_name = f"{model._meta.app_label}/{model._meta.model_name}.html"
+
+    class View(generic.ObjectChildrenView):
+        def __init__(self, *args, **kwargs):
+            self.queryset = model.objects.all()
+            self.child_model = models.VulnerabilityAssignment
+            self.table = tables.VulnerabilityAssignmentTable
+            self.template_name = "nb_risk/generic_vulnerability_list.html"
+            super().__init__(*args, **kwargs)
+
+        tab = ViewTab(
+            label="Vulnerabilities",
+            badge=lambda obj: models.VulnerabilityAssignment.objects.filter(
+                asset_object_type=ContentType.objects.get_for_model(obj),
+                asset_id=obj.id,
+            ).count(),
+            hide_if_empty=True,
+        )
+
+        def get_children(self, request, parent):
+            childrens = self.child_model.objects.filter(
+                asset_object_type=ContentType.objects.get_for_model(parent),
+                asset_id=parent.id,
+            )
+            return childrens
+
+        def get_extra_context(self, request, instance):
+            data = {
+                "base_template_name": base_template_name,
+            }
+            return data
+
+    register_model_view(model, name=name, path=path)(View)
+
+
+supported_assets = get_plugin_config("nb_risk", "supported_assets")
+additional_assets = get_plugin_config("nb_risk", "additional_assets")
+supported_assets = supported_assets + additional_assets
+
+for supported_asset in supported_assets:
+    create_view(supported_asset)
+
+# VulnerabilityAssignment Views
+
+
+class VulnerabilityAssignmentEditView(custom_views.GetReturnURLMixin, generic.ObjectEditView):
+    queryset = models.VulnerabilityAssignment.objects.all()
+    form = forms.VulnerabilityAssignmentForm
+    template_name = "nb_risk/generic_vulnerability_assignment_edit.html"
+
+    def alter_object(self, instance, request, args, kwargs):
+
+        if not instance.pk:
+            # Assign the object based on URL kwargs
+            content_type = get_object_or_404(
+                ContentType, pk=request.GET.get("asset_object_type")
+            )
+            instance.object = get_object_or_404(
+                content_type.model_class(), pk=request.GET.get("asset_id")
+            )
+        else:
+            instance.object = instance.asset
+        return instance
+    
+    def get_extra_addanother_params(self, request):
+        return {
+            "asset_object_type": request.GET.get("asset_object_type"),
+            "asset_id": request.GET.get("asset_id"),
+        }
+
+
+class VulnerabilityAssignmentDeleteView(generic.ObjectDeleteView):
+    queryset = models.VulnerabilityAssignment.objects.all()
+
+class VulnerabilityAssignmentBulkDeleteView(generic.BulkDeleteView):
+    queryset = models.VulnerabilityAssignment.objects.all()
+    table = tables.VulnerabilityExploitListTable
+
+class VulnerabilityAssignmentListView(generic.ObjectListView):
+    queryset = models.VulnerabilityAssignment.objects.all()
+    table = tables.VulnerabilityAssignmentListViewTable
+    filterset = filtersets.VulnerabilityAssignmentFilterSet
+    filterset_form = forms.VulnerabilityAssignmentFilterForm
+    actions = {
+        'import': {'add'},
+        'export': {'view'},
+        'bulk_delete': {'delete'},
+    }
+
+class VulnerabilityAssignmentImportView(generic.BulkImportView):
+    queryset = models.VulnerabilityAssignment.objects.all()
+    model_form = forms.VulnerabilityAssignmentImportForm
+    table = tables.VulnerabilityExploitListTable
+
+    def save_object(self, object_form, request):
+        if object_form.cleaned_data["ip_address"] is not None:
+            ip_address = object_form.cleaned_data["ip_address"]
+            parent = ip_address.assigned_object.parent_object
+            vulnAssingment = models.VulnerabilityAssignment(
+                vulnerability=object_form.cleaned_data["vulnerability"],
+                asset = parent,
+            )
+            vulnAssingment.full_clean()
+            vulnAssingment.save()
+            return vulnAssingment                        
+
+
+        return object_form.save()
+
+
+
+# Risk Views
+
+
+class RiskListView(generic.ObjectListView):
+    queryset = models.Risk.objects.all()
+    table = tables.RiskTable
+    filterset = filtersets.RiskFilterSet
+    filterset_form = forms.RiskFilterForm
+
+
+class RiskView(generic.ObjectView):
+    queryset = models.Risk.objects.all()
+
+
+class RiskEditView(custom_views.GetReturnURLMixin, generic.ObjectEditView):
+    queryset = models.Risk.objects.all()
+    form = forms.RiskForm
+
+
+class RiskDeleteView(generic.ObjectDeleteView):
+    queryset = models.Risk.objects.all()
+
+
+class RiskBulkDeleteView(generic.BulkDeleteView):
+    queryset = models.Risk.objects.all()
+    table = tables.RiskTable
+
+# Control Views
+
+class ControlListView(generic.ObjectListView):
+    queryset = models.Control.objects.all()
+    table = tables.ControlTable
+    filterset = filtersets.ControlFilterSet
+    filterset_form = forms.ControlFilterForm
+
+class ControlView(generic.ObjectView):
+    queryset = models.Control.objects.all()
+
+    def get_extra_context(self, request, instance):
+        risks = instance.risk.all()
+        thread_events = []
+        for risk in risks:
+            thread_events.append(risk.threat_event)
+        assets = models.VulnerabilityAssignment.objects.filter(threat_events__in=thread_events)
+        data = {
+            "risks_count": risks.count(),
+            "assets_count": assets.count(),
+        }
+        return data
+
+@register_model_view(models.Control, name='risks')
+class ControlRisksView(generic.ObjectChildrenView):
+    queryset = models.Control.objects.all()
+    child_model = models.Risk
+    table = tables.RiskTable
+    template_name = "nb_risk/control_risks.html"
+    tab = ViewTab(label='Risks', badge=lambda obj: obj.risk.all().count(), hide_if_empty=True)
+
+    def get_children(self, request, parent):
+            childrens = parent.risk.all()
+            return childrens
+
+def _get_assets(instance):
+        risks = instance.risk.all()
+        thread_events = []
+        for risk in risks:
+            thread_events.append(risk.threat_event)
+        assets = models.VulnerabilityAssignment.objects.filter(threat_events__in=thread_events)
+        return assets
+
+@register_model_view(models.Control, name='assets')
+class ControlAssetsView(generic.ObjectChildrenView):
+    queryset = models.Control.objects.all()
+    child_model = models.VulnerabilityAssignment
+    table = tables.VulnerabilityAssignmentListTable
+    template_name = "nb_risk/control_assets.html"
+    tab = ViewTab(label='Related Assets', badge=lambda obj: _get_assets(obj).count(), hide_if_empty=True)
+
+
+    def get_children(self, request, parent):
+            childrens = _get_assets(parent)
+            return childrens
+
+class ControlEditView(custom_views.GetReturnURLMixin, generic.ObjectEditView):
+    queryset = models.Control.objects.all()
+    form = forms.ControlForm
+
+class ControlDeleteView(generic.ObjectDeleteView):
+    queryset = models.Control.objects.all()
+
+class ControlBulkDeleteView(generic.BulkDeleteView):
+    queryset = models.Control.objects.all()
+    table = tables.ControlTable
