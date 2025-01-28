@@ -67,7 +67,7 @@ class VulnerabilitySerializer(NetBoxModelSerializer):
     url = serializers.HyperlinkedIdentityField(view_name="plugins-api:nb_risk-api:vulnerability-detail")
     display = serializers.SerializerMethodField('get_display')
 
-    base_score = serializers.DecimalField(max_digits=4, decimal_places=2, required=False, allow_null=True)  # ✅ ADDED BASE SCORE
+    base_score = serializers.DecimalField(max_digits=4, decimal_places=2, required=False, allow_null=True)  
 
     def get_display(self, obj):
         return obj.name
@@ -81,7 +81,7 @@ class VulnerabilitySerializer(NetBoxModelSerializer):
             "name",
             "cve",
             "description",
-            "base_score",  # ✅ INCLUDED BASE SCORE IN API RESPONSE
+            "base_score", 
         ]
 
         brief_fields = ['id', 'url', 'display', 'name', 'description', 'base_score']
